@@ -1,0 +1,66 @@
+=== Some informations ===
+Copyright (C) 2010-2011 by BoboTiG.
+ 
+purmous comes with ABSOLUTELY NO WARRANTY.
+This is free software, and you are welcome to redistribute it under 
+certain conditions. See the GNU General Public Licence for details.
+
+purmous is a tool to purge temporary files on a mounted system.
+
+
+=== Supported operating systems ===
+	+ Microsoft Windows family :
+		2000, 2003, XP, 2008, Vista and Seven
+	+ GNU/Linux
+	+ Mac OS(X)
+	+ Stockage partition :
+		i.e which does not contains any OS, like USB key, media disk or
+		data partition.
+	+ A missing, a mistake ? Contact me at bobotig (!) gmail (!) com.
+
+
+=== Some explications with examples ===
+Scenario 1 : 
+	"I am running Debian GNU/Linux and want to purge my Windows XP which 
+	is located to /dev/sda2 and mounted into /mnt/windows.
+	How can I do this man ??"
+	=> For a 'normal' purgation, you can try :
+		perl purmous -p /mnt/windows xp
+	
+	"o_O It is so cool! And what will happen then ?"
+	=> purmous will check the the partition mounted into /mnt/windows
+	as Windows XP to find out temporary files located into specific
+	folders.
+	Then it will show a summary where you can see how many files have 
+	been found and the total weight.
+	Finally, it will ask if you want to process to the deletion, by 
+	default, it will do nothing.
+	
+	"Amaziiing !!!"
+	=> Thank you xD
+	
+	"But is it possible to know what are the 'specific folders' in which
+	the tool will looking for ?"
+	=> Sure. For Windows XP :
+		perl purmous -i xp
+	
+	"Ok nice. Is it over ?"
+	=> A little last thing, you have an 'audit mode' enabled by the '-a'
+	option. It will append a file purmous_audit_yyyymmdd_hhmmss.log 
+	where all files found will be logged into with the total weight.
+	Then the tool will exit, no deletion here.
+	A verbosity option ('-V') is also available to print all files 
+	found and ask for deletion.
+	Examples :
+		perl purmous -p /mnt/windows xp -a
+		perl purmous -p /mnt/windows xp -V
+
+Scenario 2 :
+	"Can I purge the local file system ?"
+	=> Yes, (we|you) can !
+	Just imagine you are running Windows Seven on D:, try this :
+		perl purmous -p D: seven
+
+
+=== End ===
+use bye::bye qw(Tcho);

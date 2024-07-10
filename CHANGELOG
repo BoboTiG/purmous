@@ -1,0 +1,53 @@
+=== 0.95.1 ===
++ add Mozilla Firefox cache to deletion for Windows XP/2003
+
+
+=== 0.95.0 ===
++ code refactoring
++ add purge_all() sub to check all known paths to purge
++ add CryptnetUrlCache to deletion for Windows 2008, Vista and 7even
++ add Google Chrome cache to deletion for Windows 2008, Vista and 7even
++ add Microsoft Office 2012 recent files to deletion for Windows 2008, Vista and 7even
++ improve Internet Explorer cache deletion for Windows 2008, Vista and 7even
++ improve MS windows family cache deletion
+
+
+=== 0.94.3 ===
++ tweak the weight() sub
++ replace 'print' by the 'say' feature
+
+
+=== 0.94.2 ===
++ fix typo error into print_audit() sub when it is impossible to append the file
++ add Mozilla Firefox cache to deletion for GNU/Linux, Windows 2008, Vista and 7even
+
+
+=== 0.94.1 ===
++ add few italian paths to XP / 2003 purgation
++ review versioning
+
+
+=== 0.94 ===
++ useless use of Readonly module
++ fix total size display
++ add RECYCLER/* path to stock purgation
++ few code review
+
+
+=== 0.93 ===
++ fix 'Use of uninitialized value in addition (+) at purmous line 239.'
++ add -v (or --version) option to print the purmous version
++ add Mac OS(X) to OS purgation
++ code reviewed to succesfully pass Perl::Critic (severity 2 'cruel')
++ change -v option (for verbosity) to -V
++ change use of <...> to bsd_glob() from File::Glob module 
++ add POD documentation : try with 'perldoc purmous'
+
+
+=== 0.92.1 ===
++ fix 'Warning: Use of "shift" without parentheses is ambiguous at purmous line 181.'
++ replace 'linux' by 'gnu' for OS selection
+
+
+=== 0.92 ===
++ release candidate

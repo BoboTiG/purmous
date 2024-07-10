@@ -1,0 +1,827 @@
+#!/bin/perl
+#
+# $Author: BoboTiG <bobotig@gmail.com> (http://www.bobotig.fr)$
+# $Id: purmous$
+# $Revision: 0$, $HeadURL: http://purmous.sourceforge.net/$, $Date: 2010/03/19$
+# $Revision: 0$, $Source: http://purmous.sourceforge.net/$, $Date: 2010/03/19$
+#
+#
+#  Purge Mounted System
+#  --------------------
+#  Try 'purmous -i' for more informations or see README.
+#
+# Under GNU GPL license v3 or higher.
+#
+
+
+use strict;
+use warnings;
+
+
+# === [ Variables ] ====================================================
+our $VERSION = '0.9';	# Tool version
+my @files;				# All files which will be deleted
+my $weight = 0;			# Weight of deleted files
+my $lock = 0;			# Protection against current system deletions
+my $audit = 0;			# Audit mode
+my $verbose = 0;		# Verbosity
+
+# OS from Microsoft: dos, MSWin32, os2
+my $microsoft_os = 0;
+my $os = $^O;
+if ( $os eq 'dos' || $os eq 'MSWin32' || $os eq 'os2' ) {
+	$microsoft_os = 1;
+}
+# === [ /Variables ] ===================================================
+
+
+# === [ Messages ] =====================================================
+my $help = "Usage : $0 OPTION [ARGUMENTS [-a,-v]]
+
+Options:
+  -h,  --help	display this message
+  -i,  --infos	print details about the purgation
+  -p,  --purge	purgation processus
+
+Additional options:
+  -a	audit mode, i.e. print all files found to STDOUT, then
+	append the file purmous_audit_yyyymmdd.log and exit
+  -v	verbosity
+";
+if ( ! $microsoft_os ) {
+	$help .= "
+Examples:
+  $0 -p /mnt/xp/ xp
+	-> purge system mounted in /mnt/xp/ as M\$ Windows XP system
+  $0 -p /mnt/xp/ xp -v
+	-> idem plus verbosity
+  $0 -p /mnt/xp/ xp -a
+	-> print all files which should be deleted to STDOUT and exit
+";
+} else {
+	$help .= "
+Examples:
+  perl $0 -p G: xp
+	-> purge system mounted in G: as M\$ Windows XP system
+  perl $0 -p G: xp -v
+	-> idem plus verbosity
+  perl $0 -p G: xp -a
+	-> print all files which should be deleted to STDOUT and exit
+";
+}
+$help .= "
+Report bugs, suggestions and comments to <bobotig\@gmail.com>.
+";
+my $info = "
+
+  This tool was written to purge temporary files on a mounted system.
+  It is full functional for:
+    - Microsoft Windows (2000, 2003, XP, 2008, Vista, Seven)
+    - GNU/Linux
+    - Stockage partition
+    - Another OS or missing? Do not hesitate to contact me =D
+
+  Written by BoboTiG [ http://bobotig.fr ] <bobotig\@gmail.com>
+  License: GNU GPL version 3 or higher.
+
+For more details try:
+  $0 -i (2000|2003|xp|2008|vista|seven|linux|stock)
+";
+my $title = "
+  Purge Mounted System
+  --------------------";
+my $legend = "
+
+--[[ A missing? Do not hesitate to contact me. ]]--
+";
+my $stock = "
+
+  == Stockage partition ==
+  Folders and files to purge:
+    . FOUND.*
+    . \$RECYCLE.BIN/*
+    . Recycled/*
+    . .Trash-1000/files/*
+    . .Trash-1000/info/*";
+my $generation0 = "
+
+  == Microsoft Windows 2000 ==
+  Folders and files to purge:
+    . Documents and Settings/<*>
+        -> not All Users
+        -> not Default User
+        (...)/Local Settings/Temp/*
+        (...)/Local Settings/Temporary Internet Files/*
+        (...)/Recent/*
+    . RECYCLER/<*>/*
+    . WINNT/Temp/*
+    . WINNT/\$*";
+my $generation1 = "
+
+  == Microsoft Windows XP/2003 ==
+  Folders and files to purge:
+    . Documents and Settings/<*>
+        -> not All Users
+        -> not Default User
+        -> not LocalService
+        -> not NetworkService
+        (...)/Local Settings/Temp/*
+        (...)/Local Settings/Temporary Internet Files/*
+        (...)/Recent/*
+    . RECYCLER/<*>/*
+    . WINDOWS/Prefetch/*
+        -> not Layout.ini
+    . WINDOWS/Temp/*
+    . WINDOWS/\$*
+        -> not \$hf_mig\$";
+my $generation2 = "
+
+  == Microsoft Windows 2008 / Vista / 7even ==
+  Folders and files to purge:
+    . \$Recycle.Bin/<*>/*
+    . Users/<*>
+        -> not Public
+        -> not Default
+        (...)/AppData/Local/Temp/*
+            -> not Low
+        (...)/AppData/Local/Microsoft/Feeds Cache/*
+            -> not index.dat
+        (...)/AppData/Local/Microsoft/Windows/Caches/*
+        (...)/AppData/Local/Microsoft/Windows/Temporary Internet Files/*
+            -> not Content.MSO
+            -> not Content.Word
+            -> not Low
+            -> not Virtualized
+        (...)/AppData/Roaming/Microsoft/Windows/Recent/*
+            -> not AutomaticDestinations
+            -> not CustomDestinations
+    . Windows/Prefetch/*
+        -> not ReadyBoot
+        -> not Layout.ini
+    . Windows/SoftwareDistribution/Download/*
+    . Windows/Temp/*";
+my $generation_futur = "
+
+  == GNU/Linux ==
+  Folders and files to purge:
+    . home/<*>/.local/share/Trash/files/*
+    . home/<*>/.local/share/Trash/nfo/*
+    . tmp/*
+    . var/tmp/*";
+my $wrong_os = "[!] Wrong OS. Try '$0 --help'.\n";
+my $nothing = "O_o Nothing to do ...
+[-] Try '$0 --help' for more informations.
+";
+my $unknown = "O_o Unknown command ...
+[-] Try '$0 --help' for more informations.
+";
+my $lock_message = "[!] Hey! Purgation processus locked, maybe:
+	- the mount point does no exist,
+	- or you are trying to purge the current file system,
+	- or you do not have enough rights,
+	- or I do not know c'mon guy! What else?
+[-] Ex(c)iting...
+";
+my @output = '';
+# === [ /Messages ] ====================================================
+
+
+# === [ Subs ] =========================================================
+#
+# (void)check_path
+# Info: check path
+# Params: (string) path
+# Return: (string) path checked
+#
+sub check_path {
+	my @argz = @_;
+
+	if ( substr($argz[0], -1) ne '/' ) {
+		$argz[0] .= '/';
+	}
+	# Local system / Is the mounted system writable?
+	if ( $argz[0] eq '/' or ! is_writable($argz[0]) ) {
+		$lock = 1;
+	}
+	print '[-] Path: '.$argz[0]."\n";
+	push @output, '[-] Path: '.$argz[0]."\n";
+	return $argz[0];
+} #end check_path
+
+#
+# (void)is_writable
+# Info: check if the mounted system is writable
+# Params: (string) path
+# Return: (int) 1 if writable, else 0
+#
+sub is_writable {
+	my @argz = @_;
+	my $ok = 0;
+	my $test_file = $argz[0].'test.purmous';
+
+	if ( utime(time, time, $test_file)
+		 or (open(F, ">$test_file") and close F) ) {
+		if ( unlink($test_file) ) {
+			$ok = 1;
+		}
+	}
+	return $ok;
+} #end is_writable
+
+
+#
+# (void)count
+# Info: count files in one folder, recursive function
+# Params: none
+#
+sub count {
+	my @argz = @_;
+
+	push @files, $argz[0];
+	if ( -d $argz[0] ) {
+		if ( opendir(DIR, $argz[0]) ) {
+			for my $f ( readdir DIR ) {
+				if ( $f ne '.' and $f ne '..' ) {
+					if( -d $argz[0].'/'.$f ) {
+						count($argz[0].'/'.$f);
+					}
+					push @files, $argz[0].'/'.$f;
+				}
+			}
+			#closedir(DIR);
+		}
+	}
+	return;
+} #end count
+
+
+#
+# (void)delete_all_files
+# Info: sub to ask and delete files and folders
+# Params: none
+#
+sub delete_all_files {
+	my $rep = '';
+	my $not_deleted = 0;
+	my $m = 0;
+	my $nb_files = $#files;
+	my $weight_msg = '';
+	my ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst) = localtime(time);
+	my $output = $0.'_audit_'.(1900+$year);
+
+	$mon = '0'.($mon+1) if ( ($mon + 1) < 10 );
+	$output .= $mon.$mday.'.log';
+	if ( $nb_files > 0 ) {
+		@files = uniq_array();
+		@files = sort(@files);
+		$nb_files = $#files + 1;
+		foreach my $file ( @files ) {
+			$weight += (stat($file))[7];
+			push @output, $file."\n";
+		}
+		$weight_msg .= "\t-> ".$nb_files.' file';
+		( $nb_files > 1 ) ? $weight_msg .= 's' : $weight_msg .= '';
+		$weight_msg .= ' found '.weight()."\n";
+		push @output, $weight_msg;
+		if ( $audit ) {
+			open FILE, '>', $output;
+			print FILE @output;
+			close FILE;
+			print '[+] File '.$output.' created.'."\n";
+			return;
+		} elsif ( $verbose ) {
+			foreach my $file ( @files ) {
+				print $file."\n";
+			}
+		}
+		print $weight_msg;
+		if ( $lock ) {
+			print $lock_message;
+			return;
+		}
+		print "\t-> ".'Process to deletion (y/N) ? ';
+		chomp($rep = <STDIN>);
+		if ( $rep eq 'y' || $rep eq 'Y' ) {
+			print '[+] Working ...'."\n";
+			$m = $nb_files - 1;
+			while ( $m >= 0 ) {
+				if ( -f $files[$m] ) {
+					if ( ! unlink($files[$m]) ) {
+						++$not_deleted;
+					}
+				} else {
+					if ( ! rmdir($files[$m]) ) {
+						++$not_deleted;
+					}
+				}
+				--$m;
+			}
+			if ( $not_deleted == 1 ) {
+				print '[!] 1 file not deleted.'."\n";
+			} elsif ( $not_deleted > 1 ) {
+				print '[!] '.$not_deleted.' files not deleted.'."\n";
+			}
+			print '[+] System purged!'."\n";
+		} else {
+			print '[+] No file deleted.'."\n";
+			print '[+] Arf ... System not purged!'."\n";
+		}
+	} else {
+		print '[+] System is clean :)'."\n";
+	}
+	return;
+} #end delete_all_files
+
+
+#
+# (void)Sub: files_deleted
+# Info: after deletion, print information
+# Params: (int) number of deleted files
+#
+sub files_deleted {
+	my @argz = @_;
+	
+	if ( $argz[0] == 0 ) {
+		print '[+] System clean.'."\n";
+	} else {
+		print '[+] '.$argz[0].' file';
+		( $argz[0] > 1 ) ? print 's' : print '';
+		print ' deleted.'."\n";
+	}
+	return;
+} #end 
+
+
+#
+# (int)in_array
+# Info: check if a var is in an array sub
+# Params: (string)variable, (array)checked_array
+# Returns: 1 if variable exists, else 0
+#
+sub in_array {
+	my @argZ = @_;
+	
+	if ( defined($argZ[0]) ) {
+		my $var = $argZ[0];
+		shift(@argZ);
+		foreach my $item ( @argZ ) {
+			return 1 if ( $item eq $var );
+		}
+	}
+	return 0;
+}
+
+
+#
+# (void)main
+# Info: main sub, arguments traitment
+# Params: (array) arguments
+#
+sub main {
+	my @argz = @_;
+
+	# Arguments traitment
+	print ">>> $0 v$VERSION\n";
+	push @output, ">>> $0 v$VERSION\n";
+	if ( $argz[0] ) {
+		if ( $argz[0] eq '-h' or $argz[0] eq '--help' ) {
+			print $help;
+		} elsif ( $argz[0] eq '-i' or $argz[0] eq '--infos' ) {
+			# OS specifications
+			if ( lc($argz[1]) ) {
+				if ( $argz[1] eq 'stock' ) {
+					print $title.$stock.$legend;
+					push @output, $title.$stock.$legend;
+				} elsif ( $argz[1] eq '2000' ) {
+					print $title.$generation0.$legend;
+					push @output, $title.$generation0.$legend;
+				} elsif ( $argz[1] eq 'xp' or $argz[1] eq '2003') {
+					print $title.$generation1.$legend;
+					push @output, $title.$generation1.$legend;
+				} elsif ( $argz[1] eq '2008' or $argz[1] eq 'vista' ) {
+					print $title.$generation2.$legend;
+					push @output, $title.$generation2.$legend;
+				} elsif ( $argz[1] eq 'seven' ) {
+					print $title.$generation2.$legend;
+					push @output, $title.$generation2.$legend;
+				} elsif ( $argz[1] eq 'linux' ) {
+					print $title.$generation_futur.$legend;
+					push @output, $title.$generation_futur.$legend;
+				}  else {
+					print $title.$info;
+					push @output, $info;
+				}
+			}  else {
+				print $title.$info;
+				push @output, $info;
+			}
+		} elsif ( $argz[0] eq '-p' or $argz[0] eq '--purge' ) {
+			# Check path
+			$argz[1] = check_path($argz[1]);
+			# Verbose or audit?
+			if ( $argz[3] and $argz[3] eq '-v' ) {
+				$verbose = 1;
+			} elsif ( $argz[3] and $argz[3] eq '-a' ) {
+				$audit = 1;
+			}
+			# OS specifications
+			if ( $argz[2] ) {
+				if ( $argz[2] eq 'stock' ) {
+					purge_stock($argz[1]);
+				} elsif ( $argz[2] eq '2000' ) {
+					purge_generation0($argz[1]);
+				} elsif ( $argz[2] eq 'xp' or $argz[2] eq '2003' ) {
+					purge_generation1($argz[1]);
+				} elsif ( $argz[2] eq '2008' or $argz[2] eq 'vista' ) {
+					purge_generation2($argz[1]);
+				} elsif ( $argz[2] eq 'seven' ) {
+					purge_generation2($argz[1]);
+				} elsif ( $argz[2] eq 'linux' ) {
+					purge_generation_futur($argz[1]);
+				} else {
+					print $wrong_os;
+				}
+			} else {
+				print $wrong_os;
+			}
+		} elsif ( $argz[0] eq '-u' or $argz[0] eq '--update' ) {
+			update();
+		} else {
+			print $unknown;
+		}
+	} else {
+		print $nothing;
+	}
+	return;
+} #end main
+
+
+#
+# (void)purge_generation0
+# Info: Microsoft Windows 2000 purgation
+# Params: (string) path
+#
+sub purge_generation0 {
+	my @argz = @_;
+	my @files_to_delete;
+	my @to_ignore = (
+		'All Users',
+		'Default User',
+	);
+
+	print '[-] OS  : Microsoft Windows 2000'."\n";
+	push @output, '[-] OS  : Microsoft Windows 2000'."\n";
+	print '[+] Scanning ...'."\n";
+	push @output, '[+] Scanning ...'."\n";
+	# Documents and Settings/<*>
+	my @users = <"$argz[0]Documents and Settings/*">;
+	foreach my $user ( @users ) {
+		my @user = split('/', $user);
+		$user = $user[$#user];
+		if ( ! in_array($user, @to_ignore) ) {
+			# (...)/Local Settings/Temp/*
+			@files_to_delete = <"$argz[0]Documents and Settings/$user/Local Settings/Temp/*">;
+			foreach my $file ( @files_to_delete ) {
+				count($file);
+			}
+			# (...)/Local Settings/Temporary Internet Files/*
+			@files_to_delete = <"$argz[0]Documents and Settings/$user/Local Settings/Temporary Internet Files/*">;
+			foreach my $file ( @files_to_delete ) {
+				count($file);
+			}
+			# (...)/Recent/*
+			@files_to_delete = <"$argz[0]Documents and Settings/$user/Recent/*">;
+			foreach my $file ( @files_to_delete ) {
+				count($file);
+			}
+		}
+	}
+	# RECYCLER/<*>/*
+	my @recyclers = <$argz[0]RECYCLER/*>;
+	foreach my $recycler ( @recyclers ) {
+		@files_to_delete = <$recycler/*>;
+		foreach my $file ( @files_to_delete ) {
+			count($file);
+		}
+	}
+	# WINNT/Temp/*
+	@files_to_delete = <$argz[0]WINNT/Temp/*>;
+	foreach my $file ( @files_to_delete ) {
+		count($file);
+	}
+	# WINNT/$*
+	@files_to_delete = <$argz[0]WINNT/\$*>;
+	foreach my $file ( @files_to_delete ) {
+		count($file);
+	}
+	delete_all_files();
+	return;
+} #end purge_generation0
+
+
+#
+# (void)purge_generation1
+# Info: Microsoft Windows XP/2003 purgation
+# Params: (string) path
+#
+sub purge_generation1 {
+	my @argz = @_;
+	my @files_to_delete;
+	my @to_ignore = (
+		'All Users',
+		'Default User',
+		'LocalService',
+		'NetworkService',
+	);
+
+	print '[-] OS  : Microsoft Windows XP/2003'."\n";
+	push @output, '[-] OS  : Microsoft Windows XP/2003'."\n";
+	print '[+] Scanning ...'."\n";
+	push @output, '[+] Scanning ...'."\n";
+	# Documents and Settings/<*>
+	my @users = <"$argz[0]/Documents and Settings/*">;
+	foreach my $user ( @users ) {
+		my @user = split('/', $user);
+		$user = $user[$#user];
+		if ( ! in_array($user, @to_ignore) ) {
+			# (...)/Local Settings/Temp/*
+			@files_to_delete = <"$argz[0]Documents and Settings/$user/Local Settings/Temp/*">;
+			foreach my $file ( @files_to_delete ) {
+				count($file);
+			}
+			# (...)/Local Settings/Temporary Internet Files/*
+			@files_to_delete = <"$argz[0]Documents and Settings/$user/Local Settings/Temporary Internet Files/*">;
+			foreach my $file ( @files_to_delete ) {
+				count($file);
+			}
+			# (...)/Recent/*
+			@files_to_delete = <"$argz[0]Documents and Settings/$user/Recent/*">;
+			foreach my $file ( @files_to_delete ) {
+				count($file);
+			}
+		}
+	}
+	# RECYCLER/<*>/*
+	my @recyclers = <$argz[0]RECYCLER/*>;
+	foreach my $recycler ( @recyclers ) {
+		@files_to_delete = <$recycler/*>;
+		foreach my $file ( @files_to_delete ) {
+			count($file);
+		}
+	}
+	# WINDOWS/Prefetch/*
+	@files_to_delete = <$argz[0]WINDOWS/Prefetch/*>;
+	foreach my $file ( @files_to_delete ) {
+		# Not Layout.ini!
+		count($file) if ( ! grep(/Layout.ini/, $file) );
+	}
+	# WINDOWS/Temp/*
+	@files_to_delete = <$argz[0]WINDOWS/Temp/*>;
+	foreach my $file ( @files_to_delete ) {
+		count($file);
+	}
+	# WINDOWS/$*
+	@files_to_delete = <$argz[0]WINDOWS/\$*>;
+	foreach my $file ( @files_to_delete ) {
+		count($file) if ( ! grep(/\$hf_mig\$/, $file) );
+	}
+	delete_all_files();
+	return;
+} #end purge_generation1
+
+
+#
+# (void)purge_generation2
+# Info: Microsoft Windows 2008, Vista and 7even purgation
+# Params: (string) path
+#
+sub purge_generation2 {
+	my @argz = @_;
+	my @files_to_delete;
+	my @users_to_forget = (
+		'All Users',
+		'Default',
+		'Default User',
+		'desktop.ini',
+		'Public',
+	);
+	my @to_ignore = (
+		'AutomaticDestinations',
+		'Content.MSO',
+		'Content.Word',
+		'CustomDestinations',
+		'index.dat',
+		'Low',
+		'Virtualized',
+	);
+
+	print '[-] OS  : Microsoft Windows 2008 / Vista / 7even'."\n";
+	push @output, '[-] OS  : Microsoft Windows 2008 / Vista / 7even'."\n";
+	print '[+] Scanning ...'."\n";
+	push @output, '[+] Scanning ...'."\n";
+	# $Recycle.Bin/<*>
+	my @recyclers = <"$argz[0]\$Recycle.Bin/*>;
+	foreach my $recycler ( @recyclers ) {
+		@files_to_delete = <$recycler/*>;
+		foreach my $file ( @files_to_delete ) {
+			count($file);
+		}
+	}
+	# Users/<*>
+	my @users = <"$argz[0]Users/*">;
+	foreach my $user ( @users ) {
+		my @user = split('/', $user);
+		$user = $user[$#user];
+		chop($user);
+		if ( ! in_array($user, @users_to_forget) ) {
+			# (...)/AppData/Local/Temp/*
+			@files_to_delete = <"$argz[0]Users/$user/AppData/Local/Temp/*">;
+			foreach my $file ( @files_to_delete ) {
+				my @filen = split('/', $file);
+				my $filen = $filen[$#filen];
+				count($file) if ( ! in_array($filen, @to_ignore) );
+			}
+			# (...)/AppData/Local/Microsoft/Feeds Cache/*
+			@files_to_delete = <"$argz[0]Users/$user/AppData/Local/Microsoft/Feeds Cache/*">;
+			foreach my $file ( @files_to_delete ) {
+				my @filen = split('/', $file);
+				my $filen = $filen[$#filen];
+				count($file) if ( ! in_array($filen, @to_ignore) );
+			}
+			# (...)/AppData/Local/Microsoft/Windows/Caches/*
+			@files_to_delete = <"$argz[0]Users/$user/AppData/Local/Microsoft/Windows/Caches/*">;
+			foreach my $file ( @files_to_delete ) {
+				count($file);
+			}
+			# (...)/AppData/Local/Microsoft/Windows/Temporary Internet Files/*
+			@files_to_delete = <"$argz[0]Users/$user/AppData/Local/Microsoft/Windows/Temporary Internet Files/*">;
+			foreach my $file ( @files_to_delete ) {
+				my @filen = split('/', $file);
+				my $filen = $filen[$#filen];
+				count($file) if ( ! in_array($filen, @to_ignore) );
+			}
+			# (...)/AppData/Roaming/Microsoft/Windows/Recent/*
+			@files_to_delete = <"$argz[0]Users/$user/AppData/Roaming/Microsoft/Windows/Recent/*">;
+			foreach my $file ( @files_to_delete ) {
+				my @filen = split('/', $file);
+				my $filen = $filen[$#filen];
+				count($file) if ( ! in_array($filen, @to_ignore) );
+			}
+		}
+	}
+	# Windows/Prefetch/*
+	@files_to_delete = <$argz[0]Windows/Prefetch/*>;
+	foreach my $file ( @files_to_delete ) {
+		# Do not delete ReadyBoot nor Layout.ini!
+		if ( ! grep(/ReadyBoot/, $file) && ! grep(/Layout.ini/, $file) ) {
+			count($file);
+		}
+	}
+	# Windows/Temp/*
+	@files_to_delete = <$argz[0]Windows/Temp/*>;
+	foreach my $file ( @files_to_delete ) {
+		count($file);
+	}
+	# Windows/SoftwareDistribution/Download/*
+	@files_to_delete = <$argz[0]Windows/SoftwareDistribution/Download/*>;
+	foreach my $file ( @files_to_delete ) {
+		count($file);
+	}
+	delete_all_files();
+	return;
+} #end purge_generation2
+
+
+#
+# (void)purge_generation_futur
+# Info: GNU/Linux purgation
+# Params: (string) path
+#
+sub purge_generation_futur {
+	my @argz = @_;
+	my @files_to_delete;
+
+	print '[-] OS  : GNU/Linux'."\n"; 
+	push @output, '[-] OS  : GNU/Linux'."\n"; 
+	print '[+] Scanning ...'."\n";
+	push @output, '[+] Scanning ...'."\n";
+	# home/<*>
+	my @homes = <$argz[0]home/*>;
+	foreach my $home ( @homes ) {
+		# .local/share/Trash/files/*
+		@files_to_delete = <$home/.local/share/Trash/files/*>;
+		foreach my $file ( @files_to_delete ) {
+			count($file);
+		}
+		# .local/share/Trash/info/*
+		@files_to_delete = <$home/.local/share/Trash/info/*>;
+		foreach my $file ( @files_to_delete ) {
+			count($file);
+		}
+	}
+    # tmp/*
+	@files_to_delete = <$argz[0]tmp/*>;
+	foreach my $file ( @files_to_delete ) {
+		count($file);
+	}
+	# var/tmp/*
+	@files_to_delete = <$argz[0]var/tmp/*>;
+	foreach my $file ( @files_to_delete ) {
+		count($file);
+	}
+	delete_all_files();
+	return;
+} #end purge_generation_futur
+
+
+#
+# (void)purge_stock
+# Info: Stockage partition purgation
+# Params: (string) path
+#
+sub purge_stock {
+	my @argz = @_;
+	my @files_to_delete;
+
+	print '[-] OS  : Stockage partition'."\n"; 
+	push @output, '[-] OS  : Stockage partition'."\n"; 
+	print '[+] Scanning ...'."\n";
+	push @output, '[+] Scanning ...'."\n";
+	# FOUND.*
+	@files_to_delete = <$argz[0]FOUND.*>;
+	foreach my $file ( @files_to_delete ) {
+		count($file);
+	}
+	# $RECYCLE.BIN/*
+	@files_to_delete = <$argz[0]\$RECYCLE.BIN/*>;
+	foreach my $file ( @files_to_delete ) {
+		count($file);
+	}
+	# Recycled/*
+	@files_to_delete = <$argz[0]Recycled/*>;
+	foreach my $file ( @files_to_delete ) {
+		count($file);
+	}
+	# .Trash-1000/files/*
+	@files_to_delete = <$argz[0].Trash-1000/files/*>;
+	foreach my $file ( @files_to_delete ) {
+		count($file);
+	}
+	# .Trash-1000/info/*
+	@files_to_delete = <$argz[0].Trash-1000/info/*>;
+	foreach my $file ( @files_to_delete ) {
+		count($file);
+	}
+	delete_all_files();
+	return;
+} #end purge_stock
+
+
+#
+# (array)Sub: uniq_array
+# Info: uniq an array
+#
+sub uniq_array {
+	my %u;
+	my @uniqed;
+
+	# Uniq uniq!
+	@uniqed = grep {defined} map {
+		if ( exists $u{$_} ) {
+			undef;
+		} else {
+			$u{$_} = undef;
+			$_;
+		}
+	} @files;
+	return @uniqed;
+}
+
+
+#
+# (void)weight
+# Info: print total weight of files and folders found
+# Params: none
+#
+sub weight {
+	my $total;
+
+	if ( $weight > 1099511627776 ) {
+		$total = sprintf("(%0.3f To)", ($weight / 1024 / 1024 / 1024 / 1024));
+	} elsif ( $weight > 1073741824 ) {
+		$total = sprintf("(%0.3f Go)", ($weight / 1024 / 1024 / 1024));
+	} elsif ( $weight > 1048576 ) {
+		$total = sprintf("(%0.3f Mo)", ($weight / 1024 / 1024));
+	} elsif ( $weight > 1024 ) {
+		$total = sprintf("(%0.3f Ko)", ($weight / 1024));
+	} else {
+		$total = sprintf("(%.0f o)", $weight);
+	}
+	return $total;
+} #end weight
+# === [ /Subs ] ========================================================
+
+
+# Let's go!
+main(@ARGV);
+exit;

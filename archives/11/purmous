@@ -1,0 +1,970 @@
+#!/bin/perl
+#
+# $Id       : purmous $
+# $HeadURL  : http://www.bobotig.fr/contenu/projets/purmous/ $
+# $Source   : http://www.bobotig.fr/contenu/projets/purmous/ $
+# $Author   : BoboTiG $
+# $Revision : 6 $
+# $Date     : 2010/12/18 $
+#
+#  PURge MOUnted System
+#  --------------------
+#  Try 'perl purmous -h' for more informations or see README.
+#
+
+=head1 NAME
+
+purmous - PURge MOUnted System.
+
+=head1 DESCRIPTION
+
+purmous is a tool to purge temporary files on a mounted system.
+
+=head1 SYNOPSIS
+
+perl purmous OPTION [ARGUMENTS [-a, -V]]
+
+=head1 OPTIONS
+
+=head2 -h, --help
+
+Display help message.
+
+=head2 -i, --infos
+
+Print details about the purgation, e.g. folders and files where the 
+script will look for.
+
+=head2 -p, --purge
+
+Launch purgation process.
+
+=head2 -v, --version
+
+Print purmous version.
+
+=head1 ADDITIONAL OPTIONS
+
+=head2 -a, --audit
+
+Append the file purmous_audit_yyyymmdd_hhmmss.log and exit.
+
+=head2 -V, --verbose
+
+Be verbose.
+
+=head1 REQUIRED ARGUMENTS
+
+=head2 -i, --infos
+
+This option requires one argument : the operating system (OS).
+
+List of supported OS :
+
+  (2000|2003|xp|2008|vista|seven) -> MS Windows family
+  gnu -----------------------------> GNU/Linux
+  mac -----------------------------> Mac OS(X)
+  stock ---------------------------> Stockage partition
+
+=head2 -p, --purge
+
+This option requires two arguments : the path where is mounted the OS
+and the OS type.
+
+Example :
+
+  perl purmous -p /mnt/debian gnu
+
+Explanations : 
+
+  + "/mnt/debian" is the path where my Debian GNU/Linux is mounted.
+  + "gnu" is the OS type (Debian GNU/Linux is a GNU/Linux flavor). 
+
+=head1 USAGE
+
+"I am running Debian GNU/Linux and want to purge my Windows XP which 
+is located to /dev/sda2 and mounted into /mnt/windows.
+How can I do this man ??"
+
+  perl purmous -p /mnt/windows xp
+
+"But is it possible to know what are the 'specific folders' in which
+the tool will looking for (for MS Windows XP) ?"
+
+  perl purmous -i xp
+
+=> A little last thing, you have an 'audit mode' enabled by the '-a'
+option. It will append a file purmous_audit_yyyymmdd_hhmmss.log 
+where all files found will be logged into with the total weight.
+Then the tool will exit, no deletion here.
+
+  perl purmous -p /mnt/windows xp -a
+
+A verbosity option ('-V') is also available to print all files 
+found and ask for deletion.
+
+  perl purmous -p /mnt/windows xp -V
+
+=head1 DEPENDENCIES
+
+None.
+
+=head1 DIAGNOSTICS
+
+Nothing special.
+
+=head1 CONFIGURATION
+
+Nothing special.
+
+=head1 EXIT STATUS
+
+Always 0.
+
+=head1 INCOMPATIBILITIES
+
+Unknown.
+
+=head1 BUGS AND LIMITATIONS
+
+Unknown.
+
+=head1 AUTHOR
+
+BoboTiG <bobotig@gmail.com>
+
+The current version of this script is available at
+L<http://www.bobotig.fr/contenu/projets/purmous/>.
+
+=head1 LICENSE AND COPYRIGHT
+
+Copyright (c) 2010 - BoboTiG <bobotig@gmail.com>
+
+This module is free software; you can redistribute it and/or modify it 
+under the same terms as Perl itself.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+=cut
+
+
+use strict;
+use IO::Handle;
+use File::Glob ':glob';
+use autodie 'close';
+use warnings;
+
+
+# === [ Variables ] ====================================================
+our $VERSION = 0.94; # Tool version
+my $mVERSION = 2;    # Tool sub version
+my @files;           # All files which will be deleted
+my $weight = 0;      # Weight of deleted files
+my $audit = 0;       # Audit mode
+my $verbose = 0;     # Verbosity
+my $s = q{/};        # Separator
+# === [ /Variables ] ===================================================
+
+
+# === [ Messages ] =====================================================
+my $title = sprintf 
+	'>>> purmous v%.2f.%d - Copyright (C) 2010 by BoboTiG.'."\n", 
+		$VERSION, $mVERSION;
+my $help = <<'EOF';
+
+purmous comes with ABSOLUTELY NO WARRANTY.
+This is free software, and you are welcome to redistribute it under 
+certain conditions. See the GNU General Public Licence for details.
+
+purmous is a tool to purge temporary files on a mounted system.
+
+Usage : perl purmous OPTION [ARGUMENTS [-a, -V]]
+
+Options :
+  -h,  --help		display this message
+  -i,  --infos		print details about the purgation
+  -p,  --purge		purgation processus
+  -v,  --version	print purmous version
+
+Additional options :
+  -a,  --audit		audit mode
+			i.e. append the file purmous_audit_$date.log and exit
+  -V,  --verbose	verbosity
+  
+Please see README for a better documentation with examples.
+Report bugs, suggestions and comments to <bobotig@gmail.com>.
+EOF
+my $info = <<'EOF';
+
+For more details try :
+  perl purmous -i (2000|2003|xp|2008|vista|seven) -> MS Windows family
+  perl purmous -i gnu -----------------------------> GNU/Linux
+  perl purmous -i mac -----------------------------> Mac OS(X)
+  perl purmous -i stock ---------------------------> Stockage partition
+
+EOF
+my $legend = <<'EOF';
+
+--[[ A missing ? Do not hesitate to contact me. ]]--
+EOF
+my $stock = <<'EOF';
+
+  == Stockage partition ==
+  Folders and files to purge :
+    . FOUND.*
+    . RECYCLER
+    . $RECYCLE.BIN/*
+    . Recycled/*
+    . .Trash-1000/files/*
+    . .Trash-1000/info/*
+    . .Trashes/*
+EOF
+my $generation0 = <<'EOF';
+
+  == Microsoft Windows 2000 ==
+  Folders and files to purge :
+    . Documents and Settings/<*>
+        -> not All Users
+        -> not Default User
+        (...)/Local Settings/Temp/*
+        (...)/Local Settings/Temporary Internet Files/*
+        (...)/Recent/*
+    . RECYCLER/<*>/*
+    . WINNT/Temp/*
+    . WINNT/$*
+EOF
+my $generation1 = <<'EOF';
+
+  == Microsoft Windows XP/2003 ==
+  Folders and files to purge :
+    . Documents and Settings/<*>
+        -> not All Users
+        -> not Default User
+        -> not LocalService
+        -> not NetworkService
+        (...)/Local Settings/Temp/*
+        (...)/Impostazioni local/Temp/*
+        (...)/Local Settings/Temporary Internet Files/*
+        (...)/Impostazioni local/Temporary Internet Files/*
+        (...)/Recent/*
+    . RECYCLER/<*>/*
+    . WINDOWS/Prefetch/*
+        -> not Layout.ini
+    . WINDOWS/Temp/*
+    . WINDOWS/$*
+        -> not $hf_mig$
+EOF
+my $generation2 = <<'EOF';
+
+  == Microsoft Windows 2008 / Vista / 7even ==
+  Folders and files to purge :
+    . $Recycle.Bin/<*>/*
+    . RECYCLER/<*>/*
+    . Users/<*>
+        -> not Public
+        -> not Default
+        (...)/AppData/Local/Temp/*
+            -> not Low
+        (...)/AppData/Local/Microsoft/Feeds Cache/*
+            -> not index.dat
+        (...)/AppData/Local/Microsoft/Windows/Caches/*
+        (...)/AppData/Local/Microsoft/Windows/Temporary Internet Files/*
+            -> not Content.MSO
+            -> not Content.Word
+            -> not Low
+            -> not Virtualized
+        (...)/AppData/Local/Mozilla/Firefox/Profiles/<*>/Cache/*
+        (...)/AppData/Roaming/Microsoft/Windows/Recent/*
+            -> not AutomaticDestinations
+            -> not CustomDestinations
+    . Windows/Prefetch/*
+        -> not ReadyBoot
+        -> not Layout.ini
+    . Windows/SoftwareDistribution/Download/*
+    . Windows/Temp/*
+EOF
+my $generation_futur = <<'EOF';
+
+  == GNU/Linux ==
+  Folders and files to purge :
+    . home/<*>/.local/share/Trash/files/*
+    . home/<*>/.local/share/Trash/nfo/*
+    . home/<*>/.mozilla/firefox/<*>/Cache/*
+    . tmp/*
+    . var/tmp/*
+EOF
+my $generation_neutre = <<'EOF';
+
+  == Mac OS(X) ==
+  Folders and files to purge :
+    . .Trashes/*
+    . Users/<*>
+        -> not Shared
+        -> not .DS_Store
+        -> not .localized
+        (...)/.Trash/*
+    . tmp/*
+    . var/tmp/*
+EOF
+my $wrong_os = "[!] Wrong OS. Try 'purmous --help'.\n";
+my $nothing = <<'EOF';
+O_o Nothing to do...
+[-] Try 'perl purmous --help' for more informations.
+EOF
+my $unknown = <<'EOF';
+O_o Unknown command...
+[-] Try 'perl purmous --help' for more informations.
+EOF
+my $lock_message = <<'EOF';
+[!] Hey ! Purgation processus locked, maybe :
+	- the mount point does not exist,
+	- or you do not have enough rights,
+	- or I do not know c'mon guy ! What else ?
+[-] Ex(c)iting...
+EOF
+my @output = q{};
+# === [ /Messages ] ====================================================
+
+
+# ----------------------------------------------------------------------
+# Fonction	: _stdin
+# Objectif	: good replacement for <STDIN> to avoid perlcritic warn :
+#			  ' Use "<>" or "<ARGV>" or a prompting module instead of 
+#			  "<STDIN>" '
+# Entries	: none
+# Returns	: (string)user input
+# Update	: 20100729
+#
+sub _stdin {
+	my $io;
+	my $string;
+
+	$io = IO::Handle->new();
+    if ( $io->fdopen(fileno(STDIN), 'r') ) {
+        $string = $io->getline();
+        $io->close();
+    }
+    chomp $string;
+    return $string;
+} #end _stdin ----------------------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: in_array
+# Objectif	: check if a variable is into an array
+# Entries	:
+#		- (string)variable
+#		- (array)checked_array
+# Returns	: (int)1|0
+# Update	: 20100728
+#
+sub in_array {
+	my (@argz) = @_;
+	my $var = shift @argz;
+
+	foreach ( @argz ) { return 1 if ( $_ eq $var ); }
+	return 0;
+} #end in_array --------------------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: is_writable
+# Objectif	: check if the mounted system is writable
+# Entries	: (string)path
+# Returns	: (int)1|0
+# Update	: 20100728
+#
+sub is_writable {
+	my $test_file = shift;
+	my $F;
+
+	$test_file .= 'test.purmous';
+	if ( utime time, time, $test_file
+		 or (open $F, '>', $test_file and close $F) ) {
+		return 1 if ( unlink $test_file );
+	}
+	return 0;
+} #end is_writable -----------------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: count
+# Objectif	: count files in one folder, recursive function
+# Entries	: (string)path_to_the file
+# Returns	: void
+# Update	: 20100912
+#
+sub count {
+	my $path = shift;
+	my $DIR;
+
+	push @files, $path;
+	if ( -d $path and opendir $DIR, $path ) {
+		for ( readdir $DIR ) {
+			if ( $_ ne q{.} and $_ ne q{..} ) {
+				my $current = $path.$s.$_;
+				if ( -d $current ) {
+					count($current);
+				}
+				push @files, $current;
+			}
+		}
+		closedir $DIR;
+	}
+	return;
+} #end count -----------------------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: delete_all_files
+# Objectif	: ask and delete files and folders
+# Entries	: none
+# Returns	: void
+# Update	: 20100912
+#
+sub delete_all_files {
+	my $rep = q{};
+	my $not_deleted = 0;
+	my $m = 0;
+	my $nb_files = $#files;
+	my $weight_msg = q{};
+
+	if ( $nb_files > 0 ) {
+		@files = uniq_array(@files);
+		@files = sort @files;
+		$nb_files = $#files + 1;
+		foreach ( @files ) {
+			$weight += -s $_;
+			push @output, $_."\n";
+		}
+		$weight_msg .= "\t".'-> '.$nb_files.' file';
+		if ( $nb_files > 1 ) { $weight_msg .= 's'; }
+		$weight_msg .= ' found '.weight()."\n";
+		push @output, $weight_msg;
+		if ( $audit ) {
+			print_audit();
+			return;
+		} elsif ( $verbose ) {
+			foreach ( @files ) { print $_."\n"; }
+		}
+		print $weight_msg;
+		print "\t".'-> Process to deletion (y/N) ? ';
+		$rep = _stdin();
+		if ( $rep eq 'y' or $rep eq 'Y' ) {
+			print '[+] Working ...'."\n";
+			$m = $nb_files - 1;
+			while ( $m >= 0 ) {
+				if ( -f $files[$m] ) {
+					if ( ! unlink $files[$m] ) { ++$not_deleted; }
+				} else {
+					if ( ! rmdir $files[$m] ) { ++$not_deleted; }
+				}
+				--$m;
+			}
+			if ( $not_deleted == 1 ) {
+				print '[!] 1 file not deleted.'."\n";
+			} elsif ( $not_deleted > 1 ) {
+				printf '[!] %d files not deleted.'."\n", $not_deleted;
+			}
+			print '[+] System purged !'."\n";
+		} else {
+			print '[+] No file deleted.'."\n";
+			print '[+] Arf... System not purged !'."\n";
+		}
+	} else {
+		print '[+] System is clean :)'."\n";
+	}
+	return;
+} #end delete_all_files ------------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: main
+# Objectif	: arguments traitment
+# Entries	: (array)arguments
+# Returns	: void
+# Update	: 20100912
+#
+sub main {
+	my (@argz) = @_;
+	my $action = shift @argz || q{-};
+	my $actionned = 0;
+
+	if ( $action ne '-v' and $action ne '--version' ) {
+		print $title;
+		push @output, $title;
+	}
+	if ( $action eq q{-} ) {
+		print $nothing;
+		return;
+	}
+	if ( $action eq '-h' or $action eq '--help' ) {
+		print $help;
+		$actionned = 1;
+	}
+	if ( $action eq '-i' or $action eq '--infos' ) {
+		print_os($argz[0]);
+		$actionned = 1;
+	}
+	if ( $action eq '-p' or $action eq '--purge' ) {
+		if ( ! defined $argz[0] ) { print $lock_message; return; }
+		if ( ! defined $argz[1] ) { print $wrong_os; return; }
+		purge(@argz);
+		$actionned = 1;
+	}
+	if ( $action eq '-v' or $action eq '--version' ) {
+		printf 'purmous version %.2f.'."\n", $VERSION;
+		$actionned = 1;
+	}
+	if ( ! $actionned ) {
+		print $unknown;
+		$actionned = 1;
+	}
+	return;
+} #end main ------------------------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: print_audit
+# Objectif	: 
+# Entries	: none
+# Returns	: void
+# Update	: 20101211
+#
+sub print_audit {
+	my @time = localtime time; # sec, min, h, mday, mon, y, ...
+	my $output;
+	my $FILE;
+
+	$output = sprintf 'purmous_audit_%d%02d%02d_%02d%02d%02d.log', 
+		($time['5'] + int '1900'), $time['4'], $time['3'], $time['2'], 
+		$time['1'], $time['0'];
+	if ( open $FILE, '>', $output ) {
+		print {$FILE} @output;
+		close $FILE;
+	} else {
+		printf '[!] Impossible to append %s.'."\n", $output;
+	}
+	printf '[+] File %s created.'."\n", $output;
+	return;
+} #end print_audit -----------------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: print_os
+# Objectif	: 
+# Entries	: (string)os
+# Returns	: void
+# Update	: 20100729
+#
+sub print_os {
+	my (@argz) = @_;
+	my $os = shift @argz;
+	my $wrote = 0;
+
+	if ( defined $os ) {
+		if ( $os eq 'stock' ) {
+			print $stock.$legend;
+			push @output, $stock.$legend;
+			$wrote = 1;
+		}
+		if ( $os eq '2000' ) {
+			print $generation0.$legend;
+			push @output, $generation0.$legend;
+			$wrote = 1;
+		}
+		if ( $os eq 'xp' or $os eq '2003') {
+			print $generation1.$legend;
+			push @output, $generation1.$legend;
+			$wrote = 1;
+		}
+		if ( $os eq '2008' or $os eq 'vista' or $os eq 'seven' ) {
+			print $generation2.$legend;
+			push @output, $generation2.$legend;
+			$wrote = 1;
+		}
+		if ( $os eq 'gnu' ) {
+			print $generation_futur.$legend;
+			push @output, $generation_futur.$legend;
+			$wrote = 1;
+		}
+		if ( $os eq 'mac' ) {
+			print $generation_neutre.$legend;
+			push @output, $generation_neutre.$legend;
+			$wrote = 1;
+		}
+		if ( ! $wrote ) {
+			print $info;
+			push @output, $info;
+		}
+	}  else {
+		print $info;
+		push @output, $info;
+	}
+	return;
+} #end print_os --------------------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: purge
+# Objectif	: 
+# Entries	: (array)informations (path, os, option)
+# Returns	: void
+# Update	: 20100912
+#
+sub purge {
+	my (@argz) = @_;
+	my $path = shift @argz;
+	my $os = shift @argz;
+	my $option = shift @argz;
+	my $purged = 0;
+
+	if ( $option and ($option eq '-V' or
+					  $option eq '--verbose') ) {
+		$verbose = 1;
+		print '[*] Opt  : '.$option.' (verbosity)'."\n";
+		push @output, '[*] Opt  : '.$option.' (verbosity)'."\n";
+	}
+	if ( $option and ($option eq '-a' or
+					  $option eq '--audit') ) {
+		$audit = 1;
+		print '[*] Opt  : '.$option.' (audit)'."\n";
+		push @output, '[*] Opt  : '.$option.' (audit)'."\n";
+	}
+	if ( substr($path, '-1') ne $s ) { $path .= $s; }
+	print '[-] Path : '.$path."\n";
+	push @output, '[-] Path : '.$path."\n";
+	if ( ! is_writable($path) ) {
+		print $lock_message;
+		return;
+	}
+	if ( $os eq 'stock' ) {
+		purge_stock($path);
+		$purged = 1;
+	}
+	if ( $os eq '2000' ) {
+		purge_generation0($path);
+		$purged = 1;
+	}
+	if ( $os eq 'xp' or $os eq '2003' ) {
+		purge_generation1($path);
+		$purged = 1;
+	}
+	if ( $os eq '2008' or $os eq 'vista' or $os eq 'seven' ) {
+		purge_generation2($path);
+		$purged = 1;
+	}
+	if ( $os eq 'gnu' ) {
+		purge_generation_futur($path);
+		$purged = 1;
+	}
+	if ( $os eq 'mac' ) {
+		purge_generation_neutre($path);
+		$purged = 1;
+	}
+	if ( ! $purged ) {
+		print $wrong_os;
+	}
+	return;
+} #end purge -----------------------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: purge_generation0
+# Objectif	: Microsoft Windows 2000 purgation
+# Entries	: (string)path
+# Returns	: void
+# Update	: 20100809
+#
+sub purge_generation0 {
+	my $path = shift;
+	my @to_ignore = (
+		'All Users',
+		'Default User',
+	);
+
+	print '[-] OS   : Microsoft Windows 2000'."\n";
+	push @output, '[-] OS   : Microsoft Windows 2000'."\n";
+	print '[+] Scanning...'."\n";
+	push @output, '[+] Scanning...'."\n";
+	foreach my $user ( bsd_glob($path.'Documents\ and\ Settings/*') ) {
+		my @user = split $s, $user;
+		$user = $user[-1];
+		if ( ! in_array($user, @to_ignore) ) {
+			foreach ( bsd_glob($path.'Documents and Settings/'.$user.'/Local Settings/Temp/*') ) { count($_); }
+			foreach ( bsd_glob($path.'Documents and Settings/'.$user.'/Local Settings/Temporary Internet Files/*') ) { count($_); }
+			foreach ( bsd_glob($path.'Documents and Settings/'.$user.'/Recent/*') ) { count($_) ; }
+		}
+	}
+	foreach my $recycler ( bsd_glob($path.'RECYCLER/*') ) {
+		foreach ( bsd_glob($recycler.q{/*}) ) { count($_); }
+	}
+	foreach ( bsd_glob($path.'WINNT/Temp/*') ) { count($_); }
+	foreach ( bsd_glob($path.'WINNT/$*') ) { count($_); }
+	delete_all_files();
+	return;
+} #end purge_generation0 -----------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: purge_generation1
+# Objectif	: Microsoft Windows XP/2003 purgation
+# Entries	: (string)path
+# Returns	: void
+# Update	: 20100804
+#
+sub purge_generation1 {
+	my ($path) = @_;
+	my @to_ignore = (
+		'All Users',
+		'Default User',
+		'LocalService',
+		'NetworkService',
+	);
+
+	print '[-] OS   : Microsoft Windows XP/2003'."\n";
+	push @output, '[-] OS   : Microsoft Windows XP/2003'."\n";
+	print '[+] Scanning...'."\n";
+	push @output, '[+] Scanning...'."\n";
+	foreach my $user ( bsd_glob($path.'Documents\ and\ Settings/*') ) {
+		my @user = split $s, $user;
+		$user = $user[-1];
+		if ( ! in_array($user, @to_ignore) ) {
+			foreach ( bsd_glob($path.'Documents and Settings/'.$user.'/Local Settings/Temp/*') ) { count($_); }
+			foreach ( bsd_glob($path.'Documents and Settings/'.$user.'/Impostazioni locali/Temp/*') ) { count($_); }
+			foreach ( bsd_glob($path.'Documents and Settings/'.$user.'/Local Settings/Temporary Internet Files/*') ) { count($_); }
+			foreach ( bsd_glob($path.'Documents and Settings/'.$user.'/Impostazioni locali/Temporary Internet Files/*') ) { count($_); }
+			foreach ( bsd_glob($path.'Documents and Settings/'.$user.'/Recent/*') ) { count($_); }
+		}
+	}
+	foreach my $recycler ( bsd_glob($path.'RECYCLER/*') ) {
+		foreach ( bsd_glob($recycler.q{/*}) ) { count($_); }
+	}
+	foreach ( bsd_glob($path.'WINDOWS/Prefetch/*') ) {
+		my @filen = split $s, $_;
+		my $filen = $filen[-1];
+		if ( $filen ne 'Layout.ini' ) { count($_); }
+	}
+	foreach ( bsd_glob($path.'WINDOWS/Temp/*') ) { count($_); }
+	foreach ( bsd_glob($path.'WINDOWS/$*') ) {
+		if ( $_ =~ m/\$hf_mig\$/xms ) { next; }
+		count($_);
+	}
+	delete_all_files();
+	return;
+} #end purge_generation1 -----------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: purge_generation2
+# Objectif	: Microsoft Windows 2008, Vista and 7even purgation
+# Entries	: (string)path
+# Returns	: void
+# Update	: 20101218
+#
+sub purge_generation2 {
+	my ($path) = @_;
+	my @users_to_forget = (
+		'All Users',
+		'Default',
+		'Default User',
+		'desktop.ini',
+		'Public',
+	);
+	my @to_ignore = (
+		'AutomaticDestinations',
+		'Content.MSO',
+		'Content.Word',
+		'CustomDestinations',
+		'index.dat',
+		'Low',
+		'Virtualized',
+	);
+
+	print '[-] OS   : Microsoft Windows 2008 / Vista / 7even'."\n";
+	push @output, '[-] OS   : Microsoft Windows 2008 / Vista / 7even'."\n";
+	print '[+] Scanning...'."\n";
+	push @output, '[+] Scanning...'."\n";
+	foreach my $recycler ( bsd_glob($path.'$Recycle.Bin/*') ) {
+		foreach ( bsd_glob($recycler.q{/*}) ) { count($_); }
+	}
+	foreach my $recycler ( bsd_glob($path.'RECYCLER/*') ) {
+		foreach ( bsd_glob($recycler.q{/*}) ) { count($_); }
+	}
+	foreach my $user ( bsd_glob($path.'Users/*') ) {
+		my @user = split $s, $user;
+		$user = $user[-1];
+		if ( ! in_array($user, @users_to_forget) ) {
+			foreach ( bsd_glob($path.'Users/'.$user.'/AppData/Local/Temp/*') ) {
+				my @filen = split $s, $_;
+				my $filen = $filen[-1];
+				if ( ! in_array($filen, @to_ignore) ) { count($_); }
+			}
+			foreach ( bsd_glob($path.'Users/'.$user.'/AppData/Local/Microsoft/Feeds Cache/*') ) {
+				my @filen = split $s, $_;
+				my $filen = $filen[-1];
+				if ( ! in_array($filen, @to_ignore) ) { count($_); }
+			}
+			foreach ( bsd_glob($path.'Users/'.$user.'/AppData/Local/Microsoft/Windows/Caches/*') ) { count($_); }
+			foreach ( bsd_glob($path.'Users/'.$user.'/AppData/Local/Microsoft/Windows/Temporary Internet Files/*') ) {
+				my @filen = split $s, $_;
+				my $filen = $filen[-1];
+				if ( ! in_array($filen, @to_ignore) ) { count($_); }
+			}
+			foreach my $profile ( bsd_glob($path.'Users/'.$user.'/AppData/Local/Mozilla/Firefox/Profiles/*') ) {
+				foreach ( bsd_glob($profile.'/Cache/*') ) { count($_); }
+			}
+			foreach ( bsd_glob($path.'Users/'.$user.'/AppData/Roaming/Microsoft/Windows/Recent/*') ) {
+				my @filen = split $s, $_;
+				my $filen = $filen[-1];
+				if ( ! in_array($filen, @to_ignore) ) { count($_); }
+			}
+		}
+	}
+	foreach ( bsd_glob($path.'Windows/Prefetch/*') ) {
+		if ( $_ =~ m/(ReadyBoot|Layout.ini)/xms ) { next; }
+		count($_);
+	}
+	foreach ( bsd_glob($path.'Windows/Temp/*') ) { count($_); }
+	foreach ( bsd_glob($path.'Windows/SoftwareDistribution/Download/*') ) { count($_); }
+	delete_all_files();
+	return;
+} #end purge_generation2 -----------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: purge_generation_futur
+# Objectif	: GNU/Linux purgation
+# Entries	: (string)path
+# Returns	: void
+# Update	: 20101218
+#
+sub purge_generation_futur {
+	my ($path) = @_;
+
+	print '[-] OS   : GNU/Linux'."\n"; 
+	push @output, '[-] OS   : GNU/Linux'."\n";
+	print '[+] Scanning...'."\n";
+	push @output, '[+] Scanning...'."\n";
+	foreach my $home ( bsd_glob($path.'home/*') ) {
+		foreach ( bsd_glob($home.'/.local/share/Trash/files/*') ) { count($_); }
+		foreach ( bsd_glob($home.'/.local/share/Trash/info/*') ) { count($_); }
+		foreach my $profile ( bsd_glob($home.'/.mozilla/firefox/*') ) {
+			foreach ( bsd_glob($profile.'/Cache/*') ) { count($_); }
+		}
+	}
+	foreach ( bsd_glob($path.'tmp/*') ) { count($_); }
+	foreach ( bsd_glob($path.'var/tmp/*') ) { count($_); }
+	delete_all_files();
+	return;
+} #end purge_generation_futur ------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: purge_generation_neutre
+# Objectif	: Mac OS(X) purgation
+# Entries	: (string)path
+# Returns	: void
+# Update	: 20100804
+#
+sub purge_generation_neutre {
+	my ($path) = @_;
+	my @users_to_forget = (
+		'Shared',
+		'.DS_Store',
+		'.localized',
+	);
+
+	print '[-] OS   : Mac OS(X)'."\n";
+	push @output, '[-] OS   : Mac OS(X)'."\n";
+	print '[+] Scanning...'."\n";
+	push @output, '[+] Scanning...'."\n";
+	foreach ( bsd_glob($path.'.Trashes/*') ) { count($_); }
+	foreach my $user ( bsd_glob($path.'Users/*') ) {
+		my @user = split $s, $user;
+		$user = $user[-1];
+		if ( ! in_array($user, @users_to_forget) ) {
+			foreach ( bsd_glob($path.'Users/'.$user.'/.Trash/*') ) { count($_); }
+		}
+	}
+	foreach ( bsd_glob($path.'tmp/*') ) { count($_); }
+	foreach ( bsd_glob($path.'var/tmp/*') ) { count($_); }
+	delete_all_files();
+	return;
+} #end purge_generation_neutre -----------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: purge_stock
+# Objectif	: Stockage partition purgation
+# Entries	: (string)path
+# Returns	: void
+# Update	: 20100912
+#
+sub purge_stock {
+	my ($path) = @_;
+
+	print '[-] OS   : Stockage partition'."\n";
+	push @output, '[-] OS   : Stockage partition'."\n";
+	print '[+] Scanning...'."\n";
+	push @output, '[+] Scanning...'."\n";
+	foreach ( bsd_glob($path.'FOUND.*') ) { count($_); }
+	foreach ( bsd_glob($path.'RECYCLER/*') ) { count($_); }
+	foreach ( bsd_glob($path.'$RECYCLE.BIN/*') ) { count($_); }
+	foreach ( bsd_glob($path.'Recycled/*') ) { count($_); }
+	foreach ( bsd_glob($path.'.Trash-1000/files/*') ) { count($_); }
+	foreach ( bsd_glob($path.'.Trash-1000/info/*') ) { count($_); }
+	foreach ( bsd_glob($path.'.Trashes/*') ) { count($_); }
+	delete_all_files();
+	return;
+} #end purge_stock -----------------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: uniq_array
+# Objectif	: uniq an array
+# Entries	: (array)array to uniq
+# Returns	: (array)array_uniqued
+# Update	: 20100729
+#
+sub uniq_array {
+	my (@array) = @_;
+	my @uniqed;
+
+	foreach ( @array ) {
+		if ( ! in_array($_, @uniqed) ) { push @uniqed, $_; }
+	}
+	return @uniqed;
+} #end uniq_array ------------------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# Fonction	: weight
+# Objectif	: print total weight of files and folders found
+# Entries	: none
+# Returns	: (string)weight
+# Update	: 20100912
+#
+sub weight {
+	if ( $weight > ('1024' ** '4') ) {
+		return sprintf '(%0.3f Tio)', ($weight / ('1024' ** '4'));
+	}
+	if ( $weight > ('1024' ** '3') ) {
+		return sprintf '(%0.3f Gio)', ($weight / ('1024' ** '3'));
+	}
+	if ( $weight > ('1024' ** 2) ) {
+		return sprintf '(%0.3f Mio)', ($weight / ('1024' ** 2));
+	}
+	if ( $weight > int '1024' ) {
+		return sprintf '(%0.3f Kio)', ($weight / int '1024');
+	} else {
+		return sprintf '(%.0f o)', $weight;
+	}
+} #end weight ----------------------------------------------------------
+
+
+# Let's go !
+main(@ARGV);
+exit;

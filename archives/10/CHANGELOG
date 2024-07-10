@@ -1,0 +1,29 @@
+=== 0.94.1 ===
++ add few italian paths to XP / 2003 purgation
++ review versioning
+
+
+=== 0.94 ===
++ useless use of Readonly module
++ fix total size display
++ add RECYCLER/* path to stock purgation
++ few code review
+
+
+=== 0.93 ===
++ fix 'Use of uninitialized value in addition (+) at purmous line 239.'
++ add -v (or --version) option to print the purmous version
++ add Mac OS(X) to OS purgation
++ code reviewed to succesfully pass Perl::Critic (severity 2 'cruel')
++ change -v option (for verbosity) to -V
++ change use of <...> to bsd_glob() from File::Glob module 
++ add POD documentation : try with 'perldoc purmous'
+
+
+=== 0.92.1 ===
++ fix 'Warning: Use of "shift" without parentheses is ambiguous at purmous line 181.'
++ replace 'linux' by 'gnu' for OS selection (Linux is part of GNU, it was not logic)
+
+
+=== 0.92 ===
++ release candidate

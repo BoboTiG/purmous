@@ -1,0 +1,593 @@
+#!/bin/perl
+#
+# $Author: BoboTiG <bobotig@gmail.com> (http://www.bobotig.fr)$
+# $Id: deltmp$
+# $Revision: 0$, $HeadURL: http://deltmp.sourceforge.net/$, $Date: 2010/03/19$
+# $Revision: 0$, $Source: http://deltmp.sourceforge.net/$, $Date: 2010/03/19$
+#
+#
+#  Delete Temporary files
+#  ----------------------
+#
+#  This tool was written to purge temporary files on a mounted system.
+#  It is full functional with:
+#    - Microsoft Windows XP, Vista, Seven
+#    - GNU/Linux systems
+#    - MAC systems
+#    - Another OS or missing? Do not hesitate to contact me =]
+#
+# Under GNU GPL license v3 or higher.
+#
+
+
+use strict;
+use warnings;
+use LWP::UserAgent;
+use HTTP::Request::Common qw(GET);
+
+
+# Variables
+my $VERSION = '0.3';	# Tool version
+my $files = 0;			# Number of deleted files
+my $weight = 0;			# Weight of deleted files
+my $not_deleted = 0; 	# Number of not deleted files
+my $file; 				# Current file
+my $path;				# Specific path to solve bad issue with perl glob
+my @files_to_delete; 	# Array which contains list of files to delete
+my @Files;				# Array which contains all file which will be deleted
+my @Folders;			# Array which contains all folders which will be deleted
+my $lock = 0;			# Protection against local system deletions
+my $verbose = 0;		# Verbositiy (0: none | 1: yes)
+my $i = 0;
+my $m = 0;
+
+# Links for update
+my $last_up = '19 march 2010';
+my $up_link = 'http://deltmp.sourceforge.net';
+my $test_version = 'http://deltmp.sourceforge.net/deltmp.version';
+
+# OS determination
+my $os = $^O;
+my $windows = 0;
+if ( $os eq 'dos' || $os eq 'MSWin32' || $os eq 'os2' ) {
+	$windows = 1;
+}
+
+# OS dependent commands
+my $cmd_grep = 'grep';			# Grep command
+my $cmd_del_file = 'rm -f';		# Delete single file command
+my $cmd_del_folder = 'rm -rf';	# Delete directory command
+my $cmd_ls = 'ls';				# Listing command
+my $op_system = q{};			# Option for $cmd_ls for Windows to show system files
+my $op_hidden = q{};			# Option for $cmd_ls for Windows to show hidden system files
+if ( $windows ) {
+	$cmd_grep = 'find';
+	$cmd_del_file = 'del /F /Q';
+	$cmd_del_folder = 'rmdir /S /Q';
+	$cmd_ls = 'dir /B';
+	$op_system = '/A:S';
+	$op_hidden = '/A:H';
+}	
+
+# Help message
+my $help = "
+Usage : $0 [OPTION] [ARGUMENTS] [-v]
+	
+Options:
+  -h  --help		display this message
+  -i  --infos		if you want know what is purged
+  -p  --purge		launch the purgation
+  -u  --update		update this script
+  -V  --version		print tool version
+
+Examples:
+  $0 -p /mnt/xp/ xp
+	-> purge system mounted in /mnt/xp/
+	
+  $0 -p /mnt/xp/ xp -v
+	-> idem plus verbosity
+
+deltmp version $VERSION.
+
+";
+
+
+#
+# (void)Sub: help
+# Info: check path
+# Params: none
+#
+sub check_path {
+	my @argz = @_;
+	
+	if ( ! $argz[0] ) {
+		die($help);
+	} elsif ( substr($argz[0], 0, 1) ne '/' ) {
+		die('[!] Path have to be absolute (i.e. "/mnt/xp" or "/").'."\n");
+	}
+	#$argz[0] .= '/' if ( substr($argz[0], -1) ne '/' );
+	print '[-] Path: '.$argz[0]."\n";
+	
+	# Local system?
+	$lock = 1 if ( $argz[0] eq '/' );
+	
+	return;
+}
+
+
+#
+# (void)Sub: count
+# Info: count files in one folder, recursive function
+# Params: none
+#
+sub count {
+	my @argz = @_;
+	
+	opendir(DIR, $argz[0]);
+	while ( my $f = readdir(DIR) ) {
+		if ( $f ne '.' && $f ne '..' ) {
+			count_file($argz[0].'/'.$f);
+		}
+	}
+	#closedir(DIR);
+}
+
+
+#
+# (void)Sub: count_file
+# Info: store files and folders and retieves weight file
+# Params: none
+#
+sub count_file {
+	my @argz = @_;
+	
+	print $argz[0]."\n" if ( $verbose );
+	
+	++$files;
+	
+	if ( -d "$argz[0]" ) {
+		$Folders[$m] = "$argz[0]";
+		++$m;
+		count("$argz[0]");
+	} else {
+		$Files[$i] = "$argz[0]";
+		++$i;
+		$weight += (stat($argz[0]))[7];
+	}
+	
+	return;
+}
+
+
+#
+# (void)Sub: delete_all_files
+# Info: sub to ask and delete files and folders
+# Params: none
+#
+sub delete_all_files {
+	my @argz = @_;
+	my $rep;
+	my $file_to_del;
+	my $folder_to_del;
+	my $j = 0;
+	
+	if ( $files > 1 ) {
+		print "\t-> ".$files.' files found '.weight()."\n";
+	} else {
+		print "\t-> ".$files.' file found '.weight()."\n";
+	}
+	return if ( $lock );
+	if ( $files > 0 ) {
+		print "\t-> ".'Process to deletion? (y/n) ';
+		chomp($rep = <STDIN>);
+		
+		if ( $rep eq 'y' || $rep eq 'Y' ) {
+			foreach $file_to_del ( @Files ) {
+				if ( `$cmd_del_file "$file_to_del"` ) {
+					++$not_deleted;
+				} else {
+					++$j;
+				}
+			}
+			
+			foreach $folder_to_del ( @Folders ) {
+				if ( ! `$cmd_del_folder "$folder_to_del"` ) {
+					++$not_deleted;
+				} else {
+					++$j;
+				}
+			}
+			
+			if ( $not_deleted == 1 ) {
+				print '[!] 1 file not deleted.'."\n";
+			} elsif ( $not_deleted > 1 ) {
+				print '[!] '.$not_deleted.' files not deleted.'."\n";
+			}
+			
+			if ( $j == 1 ) {
+				print '[+] 1 file deleted.'."\n";
+			} elsif ( $j > 1 ) {
+				print '[+] '.$j.' files deleted.'."\n";
+			}
+			
+			print '[+] System purged with success!'."\n";
+		} else {
+			print '[+] No file deleted.'."\n";
+			print '[+] System not purged.'."\n";
+		}
+	} else {
+		print '[+] System already purged or really clean :)'."\n";
+	}
+	return;
+}
+
+#
+# (void)Sub: files_deleted
+# Info: after deletion, print information
+# Params: (int) number of deleted files
+#
+sub files_deleted {
+	my @argz = @_;
+	
+	if ( $argz[0] == 0 ) {
+		print '[+] System clean.'."\n";
+	} elsif ( $argz[0] == 1 ) {
+		print '[+] 1 file deleted.'."\n";
+	} else {
+		print '[+] '.$argz[0].' files deleted.'."\n";
+	}
+	
+	return;
+}
+
+
+#
+# (int)Sub: in_array
+# Info: check if a var is in an array sub
+# Params: (string)variable, (array)checked_array
+# Returns: 1 if variable exists, else 0
+#
+sub in_array {
+	my @argZ = @_;
+	
+	if ( defined($argZ[0]) ) {
+		my $var = $argZ[0];
+		shift(@argZ);
+		
+		foreach my $item ( @argZ ) {
+			if ( $item eq $var ) {
+				return 1;
+			}
+		}
+	}
+	
+	return 0;
+}
+
+
+#
+# (void)Sub: main
+# Info: main sub, arguments traitment
+# Params: (array) arguments
+#
+sub main {
+	my @argz = @_;
+	my $info = "
+
+  This tool was written to purge temporary files on a mounted system.
+  It is full functional with:
+    - Microsoft Windows XP, Vista, Seven
+    - GNU/Linux systems
+    - MAC systems
+    - Another OS or missing? Do not hesitate to contact me =]
+
+  Written by BoboTiG [ http://bobotig.fr ] <bobotig\@gmail.com>
+  Creation   : 08 november 2009
+  Last update: $last_up
+
+  License: GNU GPL version 3 or higher.
+  
+Try \"$0 -i (xp|vista|seven|linux|mac)\" for more details.
+ 
+";
+	my $title = "
+  Delete Temporary files
+  ----------------------";
+	my $legend = "
+	
+  --[[ A missing? Do not hesitate to contact me. ]]--
+";
+	my $xp = "
+
+  == Microsoft Windows XP ==
+  Folders and files to purge:
+	. Documents and Settings/<*>
+		-> not All Users
+		-> not Default User
+		-> not LocalService
+		-> not NetworkService
+		(...)/Local Settings/Temp/*
+		(...)/Local Settings/Temporary Internet Files/*
+		(...)/Recent/*
+		(...)/Cookies/*
+			-> not index.dat
+	. RECYCLER/<*>/*
+	. WINDOWS/Prefetch/*
+		-> not Layout.ini
+	. WINDOWS/Temp/*
+	. WINDOWS/\$*
+
+";
+	my $vista = "
+
+  == Microsoft Windows Vista ==
+    Folders and files to purge:";
+	my $seven = "
+
+  == Microsoft Windows Seven ==
+    Folders and files to purge:
+      . \$Recycle.Bin/<*>/*
+      . Windows/Prefetch/*
+          -> not Layout.ini
+      . Windows/Temp/*";
+	my $linux_mac = "
+
+  == MAC & GNU/Linux based system ==
+    Folders and files to purge:
+      . tmp/*
+      . var/tmp/*";
+	
+	# Arguments traitment
+	if ( $argz[0] ) {
+		if ( $argz[0] eq '-h' || $argz[0] eq '--help' ) {
+			print '>>> deltmp v'.$VERSION."\n";
+			die($help);
+		} elsif ( $argz[0] eq '-i' || $argz[0] eq '--infos' ) {
+			print '>>> deltmp v'.$VERSION."\n";
+			
+			# OS specifications
+			if ( lc($argz[1]) ) {
+				if ( $argz[1] eq 'xp' ) {
+					print $title.$xp.$legend;
+				} elsif ( $argz[1] eq 'vista' ) {
+					print $title.$vista.$legend;
+				} elsif ( $argz[1] eq 'seven' ) {
+					print $title.$seven.$legend;
+				} elsif ( $argz[1] eq 'linux' || $argz[1] eq 'mac' ) {
+					print $title.$linux_mac.$legend;
+				}  else {
+					print $title.$info;
+				}
+			}  else {
+				print $title.$info;
+			}
+		} elsif ( $argz[0] eq '-p' || $argz[0] eq '--purge' ) {
+			print '>>> deltmp v'.$VERSION."\n\n";
+			
+			# Check path
+			check_path($argz[1]);
+			
+			# Verbose?
+			if ( $argz[3] && ($argz[3] eq '-v' || $argz[3] eq '--verbose') ) {
+				$verbose = 1;
+			}
+			
+			# OS specifications
+			if ( $argz[2] ) {
+				if ( $argz[2] eq 'xp' ) {
+					purge_xp($argz[1]);
+				} elsif ( $argz[2] eq 'vista' ) {
+					#purge_vista($argz[0]);
+				} elsif ( $argz[2] eq 'seven' ) {
+					#purge_seven($argz[0]);
+				} elsif ( $argz[2] eq 'linux'|| $argz[2] eq 'mac' ) {
+					purge_linux_mac($argz[1]);
+				} else {
+					die('[!] Wrong OS - accepted: xp|vista|seven|linux|mac.'."\n");
+				}
+			} else {
+				die('[!] Wrong OS - accepted: xp|vista|seven|linux|mac.'."\n");
+			}
+		} elsif ( $argz[0] eq '-V' || $argz[0] eq '--version' ) {
+			version();
+		} elsif ( $argz[0] eq '-u' || $argz[0] eq '--update' ) {
+			print '>>> deltmp v'.$VERSION."\n";
+			update();
+		} else {
+			print '>>> deltmp v'.$VERSION."\n";
+			die("Unknown command.\n");
+		}
+	} else {
+		print '>>> deltmp v'.$VERSION."\n\n";
+		print 'Nothing to do...'."\n";
+	}
+	return;
+}
+
+
+#
+# (void)Sub: purge_linux_mac
+# Info: GNU/Linux & MAC purgation
+# Params: none
+#
+sub purge_linux_mac {
+	my @argz = @_;
+	
+	print '[-] OS  : GNU/Linux & MAC'."\n"; 
+	print '[+] Scanning ...'."\n";
+	
+	# tmp/*
+	@files_to_delete = <"$argz[0]tmp/*">;
+	foreach $file ( @files_to_delete ) {
+		count_file("$file");
+	}
+	
+	# var/tmp/*
+	@files_to_delete = <"$argz[0]var/tmp/*">;
+	foreach $file ( @files_to_delete ) {
+		count_file("$file");
+	}
+	
+	# Ask for deletion
+	delete_all_files();
+	return;
+}
+
+
+#
+# (void)Sub: purge_xp
+# Info: Microsoft Windows XP purgation
+# Params: none
+#
+sub purge_xp {
+	my @argz = @_;
+	my @users_to_forget = (
+		'All Users',
+		'Default User',
+		'LocalService',
+		'NetworkService',
+	);
+
+	print '[-] OS  : Microsoft Windows XP'."\n";
+	print '[+] Scanning ...'."\n";
+	
+	# Documents and Settings/<*>
+	my @users = <"$argz[0]Documents\ and\ Settings/*">;
+	foreach my $user ( @users ) {
+		my @user = split('/', $user);
+		$user = $user[$#user];
+		
+		if ( ! in_array($user, @users_to_forget) ) {
+			# (...)/Local Settings/Temp/*
+			@files_to_delete = <"$argz[0]Documents\ and\ Settings/$user/Local Settings/Temp/*">;
+			foreach $file ( @files_to_delete ) {
+				count_file("$file");
+			}
+			
+			# (...)/Local Settings/Temporary Internet Files/*
+			@files_to_delete = <"$argz[0]Documents\ and\ Settings/$user/Local Settings/Temporary Internet Files/*">;
+			foreach $file ( @files_to_delete ) {
+				count_file("$file");
+			}
+			
+			# (...)/Recent/*
+			@files_to_delete = <"$argz[0]Documents\ and\ Settings/$user/Recent/*">;
+			foreach $file ( @files_to_delete ) {
+				count_file("$file");
+			}
+			
+			# (...)/Cookies/*
+			@files_to_delete = <"$argz[0]Documents\ and\ Settings/$user/Cookies/*">;
+			foreach $file ( @files_to_delete ) {
+				# Do not delete index.dat!
+				my @filen = split('/', $file);
+				my $filen = $filen[$#filen];
+				
+				if ( $filen ne 'index.dat' ) {
+					count_file("$file");
+				}
+			}
+		}
+	}
+	
+	# RECYCLER/<*>/*
+	$path = "$argz[0]RECYCLER/";
+	my @recyclers = `$cmd_ls $op_system "$path"`;
+	foreach my $recycler ( @recyclers ) {
+		chop($recycler);
+		@files_to_delete = `$cmd_ls "$path$recycler/"`;
+		foreach $file ( @files_to_delete ) {
+			chop($file);
+			count_file($path.$recycler.'/'.$file);
+		}
+	}
+	
+	# WINDOWS/Prefetch/*
+	$path = "$argz[0]WINDOWS/Prefetch/";
+	@files_to_delete = `$cmd_ls "$path"`;
+	foreach $file ( @files_to_delete ) {
+		# Do not delete Layout.ini!
+		chop($file);
+		if ( $file ne 'Layout.ini' ) {
+			count_file($path.$file);
+		}
+	}
+
+	# WINDOWS/Temp/*
+	$path = "$argz[0]WINDOWS/Temp/";
+	@files_to_delete = `$cmd_ls "$path"`;
+	foreach $file ( @files_to_delete ) {
+		chop($file);
+		count_file($path.$file);
+	}
+
+	# WINDOWS/$*
+	$path = "$argz[0]WINDOWS/\$";
+	@files_to_delete = `$cmd_ls $op_hidden "$path" | $cmd_grep "\\\$"`;
+	foreach $file ( @files_to_delete ) {
+		chop($file);
+		count_file($path.$file);
+	}
+
+	# Ask for deletion
+	delete_all_files();
+	return;
+}
+
+
+#
+# (void)Sub: update
+# Info: update operations
+# Params: none
+#
+sub update {
+	print "\n".'Checking deltmp version ...'."\n";
+	my $agent = new LWP::UserAgent;
+	my $requete = $agent->request(new HTTP::Request('GET', $test_version));
+	my $lastest = $requete->content;
+	print '  This version:    '.$VERSION."\n";
+	print '  Lastest version: '.$lastest;
+	if ( $VERSION < $lastest ) {
+		print '  ! Update available !'."\n";
+		print "\n".'Go to this address to get the lastest version:'."\n".$up_link."\n";
+	} elsif ( $VERSION > $lastest ) {
+		print '  ! It seems that you have a fututist version =P !'."\n";
+	}
+	return;
+}
+
+
+#
+# (void)Sub: version
+# Info: print version and exit
+# Params: none
+#
+sub version {
+	print $VERSION;
+	exit;
+}
+
+
+#
+# (void)Sub: weight
+# Info: print total weight of futur deleted files and folders
+# Params: none
+#
+sub weight {
+	my @argz = @_;
+	
+	if ( $weight > 1000000000 ) {
+		return sprintf("(%0.3f Go)", ($weight / 1024 / 1024 / 1024));
+	} elsif ( $weight > 1000000 ) {
+		return sprintf("(%0.3f Mo)", ($weight / 1024 / 1024));
+	} elsif ( $weight == 1000 ) {
+		return sprintf("(%0.3f Ko)", ($weight / 1024));
+	} else {
+		return sprintf("(%.0f o)", $weight);
+	}
+}
+
+
+# Let's go!
+main(@ARGV);
+exit;
